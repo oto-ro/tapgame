@@ -1,0 +1,760 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>タップゲーム</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+    body {
+      background: #1a1a2e;
+      display: flex; flex-direction: column; align-items: center;
+      min-height: 100dvh;
+      font-family: 'Segoe UI', sans-serif; color: #fff;
+      padding: 16px 0 32px; overflow-y: auto;
+    }
+    #game-area {
+      display: flex; flex-direction: column; align-items: center;
+      gap: 12px; width: 290px;
+    }
+    .row {
+      width: 100%; display: flex; justify-content: space-between;
+      font-size: 14px; color: #aaa;
+    }
+    .row span       { color: #fff; }
+    .row .gold      { color: #f0c040; font-weight: bold; }
+    .row .exp-color { color: #7ed6df; font-weight: bold; }
+
+    #hp-bar-bg { width:100%; height:14px; background:#333; border-radius:7px; overflow:hidden; }
+    #hp-bar    { height:100%; width:100%; background:#e74c3c; border-radius:7px; transition:width .1s ease; }
+
+    #enemy {
+      width:130px; height:130px; background:#2d1b69; border-radius:50%;
+      display:flex; align-items:center; justify-content:center;
+      font-size:56px; cursor:pointer; user-select:none;
+    }
+    #enemy:active { transform:scale(0.93); }
+
+    .divider { width:100%; border-top:1px solid #333; }
+
+    .stat-block  { display:flex; flex-direction:column; gap:4px; width:100%; }
+    .stat-info   { display:flex; align-items:baseline; gap:6px; }
+    .stat-name   { font-size:13px; color:#aaa; width:60px; flex-shrink:0; }
+    .stat-val    { font-size:15px; font-weight:bold; min-width:28px; }
+    .stat-desc   { font-size:11px; color:#888; flex:1; }
+    .item-badge  { font-size:11px; color:#f0c040; background:#2a2200; border-radius:4px; padding:1px 5px; }
+    .price-tag   { font-size:11px; color:#5dbb5d; white-space:nowrap; }
+
+    .btn-row { display:flex; gap:4px; }
+    .btn-up {
+      flex:1; height:28px; background:#333; border:none; border-radius:5px;
+      color:#f0c040; font-size:11px; font-weight:bold;
+      cursor:pointer; user-select:none; touch-action:none;
+    }
+    .btn-buy {
+      flex:1; height:28px; background:#1e3a1e; border:none; border-radius:5px;
+      color:#5dbb5d; font-size:11px; font-weight:bold;
+      cursor:pointer; user-select:none; touch-action:none;
+    }
+    .btn-up:active,  .btn-up.hold-active  { background:#555; }
+    .btn-buy:active, .btn-buy.hold-active { background:#2a502a; }
+    .btn-up:disabled  { color:#444; background:#222; cursor:default; }
+    .btn-buy:disabled { color:#444; background:#222; cursor:default; }
+
+    /* 転生 */
+    #rebirth-section { width:100%; display:flex; flex-direction:column; gap:8px; }
+    .rebirth-label { font-size:13px; color:#c084fc; letter-spacing:1px; }
+    .rebirth-info  { font-size:11px; color:#888; line-height:1.8; width:100%; }
+    .rebirth-info .hi { color:#c084fc; }
+    .rebirth-info .dim { color:#555; }
+    #btn-rebirth {
+      width:100%; height:36px; background:#2a1540; border:1px solid #6b21a8;
+      border-radius:8px; color:#c084fc; font-size:14px; font-weight:bold;
+      cursor:pointer;
+    }
+    #btn-rebirth:active { background:#3b1f57; }
+    #rebirth-confirm {
+      display:none; width:100%; gap:8px;
+    }
+    #rebirth-confirm.show { display:flex; }
+    #btn-confirm {
+      flex:1; height:34px; background:#6b21a8; border:none;
+      border-radius:7px; color:#fff; font-size:13px; font-weight:bold; cursor:pointer;
+    }
+    #btn-cancel {
+      flex:1; height:34px; background:#333; border:none;
+      border-radius:7px; color:#aaa; font-size:13px; cursor:pointer;
+    }
+
+    /* オーバーキル通知 */
+    #skip-msg {
+      position: fixed;
+      top: 40%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(192, 132, 252, 0.15);
+      border: 1px solid #c084fc;
+      border-radius: 10px;
+      padding: 10px 18px;
+      font-size: 15px;
+      color: #c084fc;
+      font-weight: bold;
+      text-align: center;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.15s;
+      z-index: 200;
+      white-space: nowrap;
+    }
+    #skip-msg.show { opacity: 1; }
+
+    /* 数単位リファレンス */
+    #unit-strip {
+      position:fixed; right:0; top:50%; transform:translateY(-50%);
+      width:60px; background:#16162a; border-left:1px solid #333;
+      border-radius:8px 0 0 8px; padding:6px 3px;
+      display:flex; flex-direction:column; z-index:50;
+      max-height:88vh; overflow-y:auto;
+    }
+    .unit-row { display:flex; justify-content:space-between; align-items:center; padding:2px 4px; border-radius:3px; }
+    .unit-row.highlight { background:#2a2a50; }
+    .unit-row .u-name { font-size:10px; color:#bbb; }
+    .unit-row .u-exp  { font-size:9px; color:#555; }
+  </style>
+</head>
+<body>
+
+<div id="unit-strip"></div>
+<div id="skip-msg"></div>
+
+<div id="game-area">
+
+  <div class="row">
+    <span>EXP</span><span class="exp-color" id="exp">0</span>
+  </div>
+  <div class="row">
+    <span>Gold</span><span class="gold" id="gold">0</span>
+  </div>
+  <div class="row">
+    <span>撃破数</span><span id="kills">0</span>
+  </div>
+
+  <div id="hp-bar-bg"><div id="hp-bar"></div></div>
+  <div class="row">
+    <span>HP</span>
+    <span><span id="hp-cur">0</span> / <span id="hp-max">0</span></span>
+  </div>
+  <div class="row">
+    <span>撃破報酬</span>
+    <span>
+      <span class="exp-color" id="reward-exp">0</span> EXP &nbsp;
+      <span class="gold"      id="reward-gold">0</span> G
+    </span>
+  </div>
+
+  <div id="enemy">👾</div>
+
+  <div class="divider"></div>
+
+  <!-- ステータス -->
+  <div class="stat-block">
+    <div class="stat-info">
+      <div class="stat-name">攻撃</div>
+      <div class="stat-val" id="val-atk">1</div>
+      <div class="stat-desc" id="desc-atk"></div>
+      <span class="item-badge" id="badge-sword" style="display:none"></span>
+    </div>
+    <div class="btn-row" data-key="atk" data-type="stat">
+      <button class="btn-up" data-amt="1">+1</button>
+      <button class="btn-up" data-amt="10">+10</button>
+      <button class="btn-up" data-amt="100">+100</button>
+      <button class="btn-up" data-amt="1000">+1000</button>
+      <button class="btn-up" data-amt="all">全部</button>
+    </div>
+  </div>
+
+  <div class="stat-block">
+    <div class="stat-info">
+      <div class="stat-name">スピード</div>
+      <div class="stat-val" id="val-spd">1</div>
+      <div class="stat-desc" id="desc-spd"></div>
+      <span class="item-badge" id="badge-shoes" style="display:none"></span>
+    </div>
+    <div class="btn-row" data-key="spd" data-type="stat">
+      <button class="btn-up" data-amt="1">+1</button>
+      <button class="btn-up" data-amt="10">+10</button>
+      <button class="btn-up" data-amt="100">+100</button>
+      <button class="btn-up" data-amt="1000">+1000</button>
+      <button class="btn-up" data-amt="all">全部</button>
+    </div>
+  </div>
+
+  <div class="stat-block">
+    <div class="stat-info">
+      <div class="stat-name">命中率</div>
+      <div class="stat-val" id="val-hit">0</div>
+      <div class="stat-desc" id="desc-hit"></div>
+      <span class="item-badge" id="badge-eye" style="display:none"></span>
+    </div>
+    <div class="btn-row" data-key="hit" data-type="stat">
+      <button class="btn-up" data-amt="1">+1</button>
+      <button class="btn-up" data-amt="10">+10</button>
+      <button class="btn-up" data-amt="100">+100</button>
+      <button class="btn-up" data-amt="1000">+1000</button>
+      <button class="btn-up" data-amt="all">全部</button>
+    </div>
+  </div>
+
+  <div class="stat-block">
+    <div class="stat-info">
+      <div class="stat-name">器用さ</div>
+      <div class="stat-val" id="val-dex">0</div>
+      <div class="stat-desc" id="desc-dex"></div>
+      <span class="item-badge" id="badge-key" style="display:none"></span>
+    </div>
+    <div class="btn-row" data-key="dex" data-type="stat">
+      <button class="btn-up" data-amt="1">+1</button>
+      <button class="btn-up" data-amt="10">+10</button>
+      <button class="btn-up" data-amt="100">+100</button>
+      <button class="btn-up" data-amt="1000">+1000</button>
+      <button class="btn-up" data-amt="all">全部</button>
+    </div>
+  </div>
+
+  <div class="stat-block">
+    <div class="stat-info">
+      <div class="stat-name">被ダメ</div>
+      <div class="stat-val" id="val-def">0</div>
+      <div class="stat-desc" id="desc-def"></div>
+      <span class="item-badge" id="badge-poison" style="display:none"></span>
+    </div>
+    <div class="btn-row" data-key="def" data-type="stat">
+      <button class="btn-up" data-amt="1">+1</button>
+      <button class="btn-up" data-amt="10">+10</button>
+      <button class="btn-up" data-amt="100">+100</button>
+      <button class="btn-up" data-amt="1000">+1000</button>
+      <button class="btn-up" data-amt="all">全部</button>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- ショップ -->
+  <div class="row"><span style="letter-spacing:1px">ショップ</span></div>
+
+  <div class="stat-block">
+    <div class="stat-info">
+      <div class="stat-name">👊 拳</div>
+      <div class="stat-val" id="val-sword">0</div>
+      <div class="stat-desc">与ダメ +1%/個</div>
+      <span class="price-tag" id="price-sword">1,000G</span>
+    </div>
+    <div class="btn-row" data-item="sword" data-type="shop">
+      <button class="btn-buy" data-amt="1">+1</button>
+      <button class="btn-buy" data-amt="10">+10</button>
+      <button class="btn-buy" data-amt="100">+100</button>
+      <button class="btn-buy" data-amt="1000">+1000</button>
+      <button class="btn-buy" data-amt="all">全部</button>
+    </div>
+  </div>
+
+  <div class="stat-block">
+    <div class="stat-info">
+      <div class="stat-name">🪶 羽</div>
+      <div class="stat-val" id="val-shoes">0</div>
+      <div class="stat-desc">スピード +1%/個</div>
+      <span class="price-tag" id="price-shoes">1,000G</span>
+    </div>
+    <div class="btn-row" data-item="shoes" data-type="shop">
+      <button class="btn-buy" data-amt="1">+1</button>
+      <button class="btn-buy" data-amt="10">+10</button>
+      <button class="btn-buy" data-amt="100">+100</button>
+      <button class="btn-buy" data-amt="1000">+1000</button>
+      <button class="btn-buy" data-amt="all">全部</button>
+    </div>
+  </div>
+
+  <div class="stat-block">
+    <div class="stat-info">
+      <div class="stat-name">👁️ 眼</div>
+      <div class="stat-val" id="val-eye">0</div>
+      <div class="stat-desc">命中率 +1%/個</div>
+      <span class="price-tag" id="price-eye">1,000G</span>
+    </div>
+    <div class="btn-row" data-item="eye" data-type="shop">
+      <button class="btn-buy" data-amt="1">+1</button>
+      <button class="btn-buy" data-amt="10">+10</button>
+      <button class="btn-buy" data-amt="100">+100</button>
+      <button class="btn-buy" data-amt="1000">+1000</button>
+      <button class="btn-buy" data-amt="all">全部</button>
+    </div>
+  </div>
+
+  <div class="stat-block">
+    <div class="stat-info">
+      <div class="stat-name">🗝️ 鍵</div>
+      <div class="stat-val" id="val-key">0</div>
+      <div class="stat-desc">取得G +1%/個</div>
+      <span class="price-tag" id="price-key">1,000G</span>
+    </div>
+    <div class="btn-row" data-item="key" data-type="shop">
+      <button class="btn-buy" data-amt="1">+1</button>
+      <button class="btn-buy" data-amt="10">+10</button>
+      <button class="btn-buy" data-amt="100">+100</button>
+      <button class="btn-buy" data-amt="1000">+1000</button>
+      <button class="btn-buy" data-amt="all">全部</button>
+    </div>
+  </div>
+
+  <div class="stat-block">
+    <div class="stat-info">
+      <div class="stat-name">🧪 毒</div>
+      <div class="stat-val" id="val-poison">0</div>
+      <div class="stat-desc">被ダメ +1%/個</div>
+      <span class="price-tag" id="price-poison">1,000G</span>
+    </div>
+    <div class="btn-row" data-item="poison" data-type="shop">
+      <button class="btn-buy" data-amt="1">+1</button>
+      <button class="btn-buy" data-amt="10">+10</button>
+      <button class="btn-buy" data-amt="100">+100</button>
+      <button class="btn-buy" data-amt="1000">+1000</button>
+      <button class="btn-buy" data-amt="all">全部</button>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- 転生 -->
+  <div id="rebirth-section">
+    <div class="rebirth-label">転生</div>
+
+    <div class="rebirth-info" id="perm-display">
+      <!-- 現在の永久バフ -->
+    </div>
+
+    <div class="rebirth-info" id="rebirth-preview">
+      <!-- 次の転生で得られるボーナス -->
+    </div>
+
+    <button id="btn-rebirth" onclick="startRebirth()">転生する</button>
+
+    <div id="rebirth-confirm">
+      <button id="btn-confirm" onclick="confirmRebirth()">確定（リセット）</button>
+      <button id="btn-cancel"  onclick="cancelRebirth()">キャンセル</button>
+    </div>
+  </div>
+
+</div><!-- #game-area -->
+
+<script>
+  // ===== 数値フォーマット =====
+  const JP_UNITS = [
+    { exp:68, name:'無量大数' }, { exp:64, name:'不可思議' },
+    { exp:60, name:'那由他'   }, { exp:56, name:'阿僧祇'   },
+    { exp:52, name:'恒河沙'   }, { exp:48, name:'極'       },
+    { exp:44, name:'載'       }, { exp:40, name:'正'       },
+    { exp:36, name:'澗'       }, { exp:32, name:'溝'       },
+    { exp:28, name:'穰'       }, { exp:24, name:'秭'       },
+    { exp:20, name:'垓'       }, { exp:16, name:'京'       },
+    { exp:12, name:'兆'       }, { exp: 8, name:'億'       },
+    { exp: 4, name:'万'       },
+  ];
+  function fmt(n) {
+    if (!isFinite(n) || isNaN(n)) return '0';
+    n = Math.floor(n);
+    if (n < 10000) return n.toLocaleString();
+    const e = Math.floor(Math.log10(n));
+    if (e >= 68) { return (n / Math.pow(10, e)).toFixed(2) + '×10^' + e; }
+    for (const u of JP_UNITS) {
+      if (n >= Math.pow(10, u.exp)) return (n / Math.pow(10, u.exp)).toFixed(2) + u.name;
+    }
+    return n.toLocaleString();
+  }
+
+  // 数単位リファレンス
+  (function() {
+    const strip = document.getElementById('unit-strip');
+    [...JP_UNITS].reverse().forEach(u => {
+      const d = document.createElement('div');
+      d.className = 'unit-row'; d.id = 'urow-' + u.exp;
+      d.innerHTML = '<span class="u-name">' + u.name + '</span><span class="u-exp">10<sup>' + u.exp + '</sup></span>';
+      strip.appendChild(d);
+    });
+  })();
+  function highlightUnit(v) {
+    document.querySelectorAll('.unit-row').forEach(r => r.classList.remove('highlight'));
+    if (v < 10000) return;
+    const e = Math.floor(Math.log10(v));
+    const best = JP_UNITS.find(u => e >= u.exp);
+    if (best) { const r = document.getElementById('urow-' + best.exp); if(r){ r.classList.add('highlight'); r.scrollIntoView({block:'nearest'}); } }
+  }
+
+  // ===== ゲームデータ =====
+  // ===== 調整パラメータ =====
+  const BASE_HP          = 10;
+  const HP_SCALE_1       = 1.1;   // 最初のHP_SCALE_SWITCH体のHP倍率
+  const HP_SCALE_2       = 1.02;  // それ以降のHP倍率（float上限: k≈35,700）
+  const HP_SCALE_SWITCH  = 100;   // 倍率切り替えキル数
+  const MAX_SKIP         = 10000; // 1タップあたりのスキップ上限
+  let kills = 0, exp = 0, gold = 0, maxHp = 0, currentHp = 0;
+
+  const stat = { atk: 1, spd: 1, hit: 0, dex: 0, def: 0 };
+
+  const ITEMS = {
+    sword:  { basePrice: 1000, buffStat: 'atk', buffPct: 1, count: 0 },
+    shoes:  { basePrice: 1000, buffStat: 'spd', buffPct: 1, count: 0 },
+    eye:    { basePrice: 1000, buffStat: 'hit', buffPct: 1, count: 0 },
+    key:    { basePrice: 1000, buffStat: 'dex', buffPct: 1, count: 0 },
+    poison: { basePrice: 1000, buffStat: 'def', buffPct: 1, count: 0 },
+  };
+
+  // ショップ価格計算（1個買うごとに10倍、転生でcountリセット→自動で元値に戻る）
+  function nextPrice(item)     { return item.basePrice * Math.pow(10, item.count); }
+  function costToBuyN(item, n) { return item.basePrice * Math.pow(10, item.count) * (Math.pow(10, n) - 1) / 9; }
+  function maxAffordable(item) {
+    const x = 9 * gold / nextPrice(item);
+    return x < 1 ? 0 : Math.floor(Math.log10(x + 1));
+  }
+
+  // 永久バフ（転生で蓄積・リセットされない）
+  // B: 素のステータス桁数 %
+  // C: ショップ購入数桁数 % （アイテムキーと対応）
+  const permB = { atk: 0, spd: 0, hit: 0, dex: 0, def: 0 };
+  const permC = { sword: 0, shoes: 0, eye: 0, key: 0, poison: 0 };
+
+  // ===== 計算式 =====
+  function calcMaxHp(k) {
+    let raw;
+    if (k <= HP_SCALE_SWITCH) {
+      raw = BASE_HP * Math.pow(HP_SCALE_1, k);
+    } else {
+      const hpAtSwitch = BASE_HP * Math.pow(HP_SCALE_1, HP_SCALE_SWITCH);
+      raw = hpAtSwitch * Math.pow(HP_SCALE_2, k - HP_SCALE_SWITCH);
+    }
+    raw = Math.floor(raw);
+    return isFinite(raw) ? raw : Number.MAX_SAFE_INTEGER;
+  }
+  function calcReward(hp) { return Math.floor(hp / 2); }
+  function digits(n)      { return n < 1 ? 0 : Math.floor(Math.log10(n)) + 1; }
+
+  // バフA: ショップ（加算式）
+  function buffA(statKey) {
+    let mult = 1;
+    for (const item of Object.values(ITEMS)) {
+      if (item.buffStat === statKey && item.count > 0)
+        mult *= (1 + item.buffPct / 100 * item.count);
+    }
+    return mult;
+  }
+  // バフB: 転生・素ステータス桁数（永久）
+  function buffB(statKey) { return 1 + 0.01 * permB[statKey]; }
+  // バフC: 転生・ショップ購入数 %（永久、対応するstatKeyへ適用）
+  function buffC_forStat(statKey) {
+    let mult = 1;
+    for (const [key, item] of Object.entries(ITEMS)) {
+      if (item.buffStat === statKey)
+        mult *= (1 + 0.01 * permC[key]);
+    }
+    return mult;
+  }
+
+  // 最終値 = 素 × バフA × バフB × バフC
+  function effectiveAtk() { return stat.atk * buffA('atk') * buffB('atk') * buffC_forStat('atk'); }
+  function effectiveSpd() { return stat.spd * buffA('spd') * buffB('spd') * buffC_forStat('spd'); }
+  function effectiveHit() { return stat.hit * buffA('hit') * buffB('hit') * buffC_forStat('hit'); }
+  function attackCount()  { return Math.floor(Math.log10(Math.max(1, effectiveSpd()))) + 1; }
+  function hitChance()    { return 50 + effectiveHit() / maxHp; }
+  // 器用さ・被ダメ: 1桁上がるごとに1ptあたりの効果×0.9（累積加算）
+  function calcDimBonus(v) {
+    if (v <= 0) return 0;
+    let bonus = 0, rem = v, start = 0, end = 10;
+    for (let d = 0; rem > 0; d++, start = end, end *= 10) {
+      const rate = 0.00001 * Math.pow(0.8, d);
+      const can  = Math.min(rem, end - start);
+      bonus += can * rate;
+      rem -= can;
+    }
+    return bonus;
+  }
+  function goldMult()     { return (1 + calcDimBonus(stat.dex)) * buffA('dex') * buffB('dex') * buffC_forStat('dex'); }
+  function defMult()      { return (1 + calcDimBonus(stat.def)) * buffA('def') * buffB('def') * buffC_forStat('def'); }
+
+  // ===== UI更新 =====
+  function updateHpDisplay() {
+    document.getElementById('hp-cur').textContent = fmt(Math.max(0, currentHp));
+    document.getElementById('hp-bar').style.width = (Math.max(0, currentHp) / maxHp * 100) + '%';
+  }
+
+  function fmtMult(m) { return '×' + (m >= 100 ? fmt(m) : m.toFixed(2)); }
+
+  function updateAll() {
+    document.getElementById('exp').textContent  = fmt(exp);
+    document.getElementById('gold').textContent = fmt(gold);
+
+    document.getElementById('val-atk').textContent = fmt(stat.atk);
+    document.getElementById('val-spd').textContent = fmt(stat.spd);
+    document.getElementById('val-hit').textContent = fmt(stat.hit);
+    document.getElementById('val-dex').textContent = fmt(stat.dex);
+
+    const tAtk = buffA('atk') * buffB('atk') * buffC_forStat('atk');
+    const tSpd = buffA('spd') * buffB('spd') * buffC_forStat('spd');
+    const tHit = buffA('hit') * buffB('hit') * buffC_forStat('hit');
+    const tDex = goldMult();
+    const tDef = defMult();
+    document.getElementById('desc-atk').textContent =
+      tAtk > 1 ? fmt(Math.floor(effectiveAtk())) + 'ダメ (' + fmtMult(tAtk) + ')' : stat.atk + 'ダメ/命中';
+    document.getElementById('desc-spd').textContent =
+      attackCount() + '回/タップ' + (tSpd > 1 ? ' (' + fmtMult(tSpd) + ')' : '');
+    document.getElementById('desc-hit').textContent =
+      '命中 ' + hitChance().toFixed(1) + '%' + (tHit > 1 ? ' (' + fmtMult(tHit) + ')' : '');
+    document.getElementById('desc-dex').textContent =
+      '取得G ' + fmtMult(tDex);
+    document.getElementById('val-def').textContent = fmt(stat.def);
+    const defPct = (tDef - 1) * 100;
+    document.getElementById('desc-def').textContent =
+      defPct > 0
+        ? '+' + (defPct >= 100 ? fmt(Math.floor(defPct)) : defPct.toFixed(1)) + '% → 与ダメ' + fmtMult(tDef)
+        : '与ダメ+0%';
+
+    const badges = { sword:'👊', shoes:'🪶', eye:'👁️', key:'🗝️', poison:'🧪' };
+    for (const [k, icon] of Object.entries(badges)) {
+      const el = document.getElementById('badge-' + k);
+      if (!el) continue;
+      el.style.display = ITEMS[k].count > 0 ? '' : 'none';
+      el.textContent = icon + '×' + ITEMS[k].count;
+    }
+    document.getElementById('val-sword').textContent  = ITEMS.sword.count;
+    document.getElementById('val-shoes').textContent  = ITEMS.shoes.count;
+    document.getElementById('val-eye').textContent    = ITEMS.eye.count;
+    document.getElementById('val-key').textContent    = ITEMS.key.count;
+    document.getElementById('val-poison').textContent = ITEMS.poison.count;
+
+    // ボタン有効/無効
+    document.querySelectorAll('.btn-row[data-type="stat"]').forEach(row => {
+      const key = row.dataset.key;
+      row.querySelectorAll('.btn-up').forEach(btn => {
+        const a = btn.dataset.amt;
+        btn.disabled = a === 'all'
+          ? maxAffordableStat(stat[key], exp) === 0
+          : exp < costToAdd(stat[key], parseInt(a));
+      });
+    });
+    document.querySelectorAll('.btn-row[data-type="shop"]').forEach(row => {
+      const item = ITEMS[row.dataset.item];
+      row.querySelectorAll('.btn-buy').forEach(btn => {
+        const a = btn.dataset.amt;
+        btn.disabled = a === 'all'
+          ? maxAffordable(item) === 0
+          : gold < costToBuyN(item, parseInt(a));
+      });
+    });
+    // 現在の購入価格を表示
+    for (const k of Object.keys(ITEMS)) {
+      const el = document.getElementById('price-' + k);
+      if (el) el.textContent = fmt(nextPrice(ITEMS[k])) + 'G';
+    }
+
+    updateRebirthUI();
+    highlightUnit(Math.max(exp, gold));
+  }
+
+  // ===== 転生UI =====
+  function calcNextRebirthBonus() {
+    const b = {};
+    for (const k of Object.keys(stat))    b['B_' + k] = digits(k === 'dex' ? stat[k] : stat[k]);
+    for (const k of Object.keys(ITEMS))   b['C_' + k] = ITEMS[k].count;
+    return b;
+  }
+
+  function updateRebirthUI() {
+    const b = calcNextRebirthBonus();
+    const permTotal = Object.values(permB).reduce((s,v)=>s+v,0) + Object.values(permC).reduce((s,v)=>s+v,0);
+
+    document.getElementById('perm-display').innerHTML = permTotal > 0
+      ? '<span class="hi">現在の永久バフ</span><br>' +
+        'B: 攻+' + permB.atk + '% SPD+' + permB.spd + '% 命中+' + permB.hit + '% 器用+' + permB.dex + '% 被ダメ+' + permB.def + '%<br>' +
+        'C: 拳+' + permC.sword + '% 羽+' + permC.shoes + '% 眼+' + permC.eye + '% 鍵+' + permC.key + '% 毒+' + permC.poison + '%'
+      : '<span class="dim">永久バフなし（転生で獲得）</span>';
+
+    document.getElementById('rebirth-preview').innerHTML =
+      '<span class="hi">次の転生ボーナス（追加分）</span><br>' +
+      'B: 攻+' + b.B_atk + '% SPD+' + b.B_spd + '% 命中+' + b.B_hit + '% 器用+' + b.B_dex + '% 被ダメ+' + b.B_def + '%<br>' +
+      'C: 拳+' + b.C_sword + '% 羽+' + b.C_shoes + '% 眼+' + b.C_eye + '% 鍵+' + b.C_key + '% 毒+' + b.C_poison + '%';
+  }
+
+  let rebirthPending = false;
+  function startRebirth() {
+    rebirthPending = true;
+    document.getElementById('btn-rebirth').style.display = 'none';
+    document.getElementById('rebirth-confirm').classList.add('show');
+  }
+  function cancelRebirth() {
+    rebirthPending = false;
+    document.getElementById('btn-rebirth').style.display = '';
+    document.getElementById('rebirth-confirm').classList.remove('show');
+  }
+  function confirmRebirth() {
+    if (!rebirthPending) return;
+    const b = calcNextRebirthBonus();
+
+    // 永久バフに加算
+    for (const k of Object.keys(permB)) permB[k] += b['B_' + k] || 0;
+    for (const k of Object.keys(permC)) permC[k] += b['C_' + k] || 0;
+
+    // リセット
+    kills = 0; exp = 0; gold = 0;
+    stat.atk = 1; stat.spd = 1; stat.hit = 0; stat.dex = 0; stat.def = 0;
+    for (const item of Object.values(ITEMS)) item.count = 0;
+
+    cancelRebirth();
+    spawnEnemy();
+  }
+
+  // ===== ステータス強化コスト（桁ごとに×2） =====
+  function statCostPerPt(v) {
+    return Math.pow(4, Math.floor(Math.log10(Math.max(1, v))));
+  }
+  function costToAdd(statVal, n) {
+    let cost = 0, v = statVal, rem = n;
+    while (rem > 0) {
+      const cpp  = statCostPerPt(v);
+      const next = cpp === 1 ? 10 : Math.pow(10, Math.floor(Math.log10(Math.max(1, v))) + 1);
+      const can  = Math.min(rem, next - v);
+      cost += can * cpp;
+      v += can; rem -= can;
+    }
+    return cost;
+  }
+  function maxAffordableStat(statVal, budget) {
+    let pts = 0, v = statVal, rem = budget;
+    while (rem > 0) {
+      const cpp  = statCostPerPt(v);
+      const next = cpp === 1 ? 10 : Math.pow(10, Math.floor(Math.log10(Math.max(1, v))) + 1);
+      const can  = Math.min(Math.floor(rem / cpp), next - v);
+      if (can === 0) break;
+      pts += can; rem -= can * cpp; v += can;
+    }
+    return pts;
+  }
+
+  // ===== 強化・購入 =====
+  function upgradeStat(key, amt) {
+    const n = amt === 'all' ? maxAffordableStat(stat[key], exp) : amt;
+    if (n === 0) return;
+    const cost = costToAdd(stat[key], n);
+    if (exp < cost) return;
+    exp -= cost; stat[key] += n; updateAll();
+  }
+  function buyItem(key, amt) {
+    const item = ITEMS[key];
+    const n = amt === 'all' ? maxAffordable(item) : amt;
+    if (n === 0) return;
+    const cost = costToBuyN(item, n);
+    if (gold < cost) return;
+    gold -= cost; item.count += n; updateAll();
+  }
+
+  // ===== 長押しボタン =====
+  function attachButtons(selector, actionFn) {
+    document.querySelectorAll(selector).forEach(row => {
+      row.querySelectorAll('button').forEach(btn => {
+        btn.addEventListener('click', () => actionFn(row, btn));
+        if (btn.dataset.amt !== '1') return;
+        let ht = null, hi = null;
+        const start = e => {
+          if (e.type === 'touchstart') e.preventDefault();
+          btn.classList.add('hold-active');
+          ht = setTimeout(() => {
+            hi = setInterval(() => { if(btn.disabled){stop();return;} actionFn(row,btn); }, 80);
+          }, 400);
+        };
+        const stop = () => { btn.classList.remove('hold-active'); clearTimeout(ht); clearInterval(hi); };
+        btn.addEventListener('touchstart', start, { passive:false });
+        btn.addEventListener('mousedown',  start);
+        ['touchend','touchcancel','mouseup','mouseleave'].forEach(ev => btn.addEventListener(ev, stop));
+      });
+    });
+  }
+
+  attachButtons('.btn-row[data-type="stat"]', (row, btn) => {
+    upgradeStat(row.dataset.key, btn.dataset.amt === 'all' ? 'all' : parseInt(btn.dataset.amt));
+  });
+  attachButtons('.btn-row[data-type="shop"]', (row, btn) => {
+    buyItem(row.dataset.item, btn.dataset.amt === 'all' ? 'all' : parseInt(btn.dataset.amt));
+  });
+
+  // ===== オーバーキル =====
+  function calcSkipCount(totalDmg, hp) {
+    const ratio = totalDmg / hp;
+    if (ratio < 100) return 0;
+    const e = Math.floor(Math.log10(ratio));
+    return Math.min(MAX_SKIP, Math.pow(10, e - 1)); // MAX_SKIPで頭打ち
+  }
+
+  // スキップ分の報酬を幾何級数で近似
+  function calcSkipRewards(fromKill, count) {
+    if (count === 0) return 0;
+    const scale = fromKill > HP_SCALE_SWITCH ? HP_SCALE_2 : HP_SCALE_1;
+    const base   = 5 * Math.pow(scale, fromKill);
+    const factor = (Math.pow(scale, count) - 1) / (scale - 1);
+    return Math.floor(base * factor);
+  }
+
+  let skipMsgTimer = null;
+  function showSkipMsg(skip, ratio) {
+    const el = document.getElementById('skip-msg');
+    el.textContent = '⚡ ×' + fmt(ratio) + ' オーバーキル → ' + fmt(skip) + '体スキップ';
+    el.classList.add('show');
+    clearTimeout(skipMsgTimer);
+    skipMsgTimer = setTimeout(() => el.classList.remove('show'), 1800);
+  }
+
+  // ===== 敵タップ =====
+  document.getElementById('enemy').addEventListener('click', () => {
+    if (currentHp <= 0) return;
+    const n = attackCount(), chance = hitChance();
+    let totalDmg = 0;
+    for (let i = 0; i < n; i++) {
+      if (Math.random() * 100 < chance) {
+        const dmg = Math.floor(effectiveAtk() * defMult());
+        totalDmg  += dmg;
+        currentHp -= dmg;
+      }
+    }
+    currentHp = Math.max(0, currentHp);
+    updateHpDisplay();
+
+    if (currentHp <= 0) {
+      const r = calcReward(maxHp);
+      exp  += r;
+      gold += Math.floor(r * goldMult());
+      kills++;
+
+      // オーバーキル判定
+      const skip = calcSkipCount(totalDmg, maxHp);
+      if (skip > 0) {
+        const skipR = calcSkipRewards(kills, skip);
+        exp  += skipR;
+        gold += Math.floor(skipR * goldMult());
+        showSkipMsg(skip, Math.floor(totalDmg / maxHp));
+        kills += skip;
+      }
+
+      document.getElementById('kills').textContent = kills;
+      spawnEnemy();
+    }
+  });
+
+  function spawnEnemy() {
+    maxHp = calcMaxHp(kills); currentHp = maxHp;
+    const reward = calcReward(maxHp);
+    document.getElementById('hp-max').textContent      = fmt(maxHp);
+    document.getElementById('reward-exp').textContent  = fmt(reward);
+    document.getElementById('reward-gold').textContent = fmt(reward);
+    updateHpDisplay(); updateAll();
+  }
+
+  spawnEnemy();
+</script>
+</body>
+</html>
