@@ -29,9 +29,9 @@
     #hp-bar    { height:100%; width:100%; background:#e74c3c; border-radius:7px; transition:width .1s ease; }
 
     #enemy {
-      width:130px; height:130px; background:#2d1b69; border-radius:50%;
+      width:200px; height:200px; background:#2d1b69; border-radius:50%;
       display:flex; align-items:center; justify-content:center;
-      font-size:56px; cursor:pointer; user-select:none;
+      font-size:80px; cursor:pointer; user-select:none;
     }
     #enemy:active { transform:scale(0.93); }
 
@@ -86,6 +86,41 @@
       border-radius:7px; color:#aaa; font-size:13px; cursor:pointer;
     }
 
+    /* セーブ通知 */
+    #save-toast {
+      position: fixed;
+      bottom: 20px; left: 50%;
+      transform: translateX(-50%);
+      background: rgba(94, 234, 212, 0.15);
+      border: 1px solid #5eead4;
+      border-radius: 8px;
+      padding: 6px 16px;
+      font-size: 12px; color: #5eead4;
+      pointer-events: none;
+      opacity: 0; transition: opacity 0.2s;
+      z-index: 200;
+    }
+    #save-toast.show { opacity: 1; }
+    /* セーブスロット */
+    #save-section { width: 100%; display: flex; flex-direction: column; gap: 6px; }
+    .save-label { font-size: 13px; color: #60a5fa; letter-spacing: 1px; }
+    .save-slot { display: flex; align-items: center; gap: 4px; width: 100%; }
+    .save-slot-info { flex: 1; font-size: 11px; color: #aaa; }
+    .save-slot-info .slot-num { color: #60a5fa; font-weight: bold; }
+    .save-slot-info .slot-empty { color: #555; }
+    .btn-ss { height: 26px; border: none; border-radius: 5px; font-size: 10px; font-weight: bold; cursor: pointer; }
+    .btn-ss:disabled { opacity: 0.25; cursor: default; }
+    .btn-ss-save { background: #1e3a1e; color: #5dbb5d; width: 44px; }
+    .btn-ss-load { background: #1a2a3a; color: #60a5fa; width: 44px; }
+    .btn-ss-del  { background: #2a1010; color: #f87171; width: 24px; }
+    #btn-reset {
+      width: 100%; height: 32px;
+      background: #1a0a0a; border: 1px solid #7f1d1d;
+      border-radius: 7px; color: #f87171;
+      font-size: 12px; cursor: pointer; margin-top: 4px;
+    }
+    #btn-reset:active { background: #2a1010; }
+
     /* オーバーキル通知 */
     #skip-msg {
       position: fixed;
@@ -111,21 +146,22 @@
     /* 数単位リファレンス */
     #unit-strip {
       position:fixed; right:0; top:50%; transform:translateY(-50%);
-      width:60px; background:#16162a; border-left:1px solid #333;
-      border-radius:8px 0 0 8px; padding:6px 3px;
+      width:36px; background:#16162a; border-left:1px solid #333;
+      border-radius:6px 0 0 6px; padding:4px 2px;
       display:flex; flex-direction:column; z-index:50;
       max-height:88vh; overflow-y:auto;
     }
-    .unit-row { display:flex; justify-content:space-between; align-items:center; padding:2px 4px; border-radius:3px; }
+    .unit-row { display:flex; justify-content:center; align-items:center; padding:1px 2px; border-radius:3px; }
     .unit-row.highlight { background:#2a2a50; }
-    .unit-row .u-name { font-size:10px; color:#bbb; }
-    .unit-row .u-exp  { font-size:9px; color:#555; }
+    .unit-row .u-name { font-size:9px; color:#bbb; }
+    .unit-row .u-exp  { display:none; }
   </style>
 </head>
 <body>
 
 <div id="unit-strip"></div>
 <div id="skip-msg"></div>
+<div id="save-toast">💾 セーブしました</div>
 
 <div id="game-area">
 
@@ -344,6 +380,15 @@
     </div>
   </div>
 
+  <div class="divider"></div>
+
+  <div id="save-section">
+    <div class="save-label">セーブ／ロード</div>
+    <div id="save-slots"></div>
+  </div>
+
+  <button id="btn-reset" onclick="resetAll()">🗑️ データをリセット（最初から）</button>
+
 </div><!-- #game-area -->
 
 <script>
@@ -446,14 +491,24 @@
     }
     return mult;
   }
+  // ===== 永久バフ共通計算 =====
+  // raw値から基本%（×2レート）、⭐数、有効%を計算
+  function permBasePct(raw)  { return raw; }
+  function permStars(raw) {
+    const p = permBasePct(raw);
+    return p >= 100 ? Math.floor(Math.log10(p / 100)) + 1 : 0;
+  }
+  function permEffPct(raw)   { return permBasePct(raw) * Math.pow(2, permStars(raw)); }
+  function permStarsStr(raw) { return '⭐'.repeat(permStars(raw)); }
+
   // バフB: 転生・素ステータス桁数（永久）
-  function buffB(statKey) { return 1 + 0.01 * permB[statKey]; }
-  // バフC: 転生・ショップ購入数 %（永久、対応するstatKeyへ適用）
+  function buffB(statKey) { return 1 + permEffPct(permB[statKey]) / 100; }
+  // バフC: 転生・ショップ購入数（永久、対応するstatKeyへ適用）
   function buffC_forStat(statKey) {
     let mult = 1;
     for (const [key, item] of Object.entries(ITEMS)) {
       if (item.buffStat === statKey)
-        mult *= (1 + 0.01 * permC[key]);
+        mult *= (1 + permEffPct(permC[key]) / 100);
     }
     return mult;
   }
@@ -561,10 +616,19 @@
   // ===== 転生UI =====
   function calcNextRebirthBonus() {
     const b = {};
-    for (const k of Object.keys(stat))    b['B_' + k] = digits(k === 'dex' ? stat[k] : stat[k]);
-    for (const k of Object.keys(ITEMS))   b['C_' + k] = ITEMS[k].count;
+    for (const k of Object.keys(stat))    b['B_' + k] = digits(stat[k]) * 2;
+    for (const k of Object.keys(ITEMS))   b['C_' + k] = ITEMS[k].count * 2;
     return b;
   }
+
+  // 永久バフ1項目の表示: "攻⭐⭐ +420%" (⭐数と有効%)
+  function fmtPermCur(label, raw) {
+    const s = permStarsStr(raw);
+    const e = Math.round(permEffPct(raw));
+    return label + s + '+' + e + '%';
+  }
+  // 追加分の表示: "+30%" (基本%のみ)
+  function fmtPermAdd(add) { return '+' + Math.round(add) + '%'; }
 
   function updateRebirthUI() {
     const b = calcNextRebirthBonus();
@@ -572,14 +636,18 @@
 
     document.getElementById('perm-display').innerHTML = permTotal > 0
       ? '<span class="hi">現在の永久バフ</span><br>' +
-        'B: 攻+' + permB.atk + '% SPD+' + permB.spd + '% 命中+' + permB.hit + '% 器用+' + permB.dex + '% 被ダメ+' + permB.def + '%<br>' +
-        'C: 拳+' + permC.sword + '% 羽+' + permC.shoes + '% 眼+' + permC.eye + '% 鍵+' + permC.key + '% 毒+' + permC.poison + '%'
+        'B: ' + fmtPermCur('攻',permB.atk) + ' ' + fmtPermCur('SPD',permB.spd) + ' ' +
+                fmtPermCur('命中',permB.hit) + ' ' + fmtPermCur('器用',permB.dex) + ' ' + fmtPermCur('被ダメ',permB.def) + '<br>' +
+        'C: ' + fmtPermCur('拳',permC.sword) + ' ' + fmtPermCur('羽',permC.shoes) + ' ' +
+                fmtPermCur('眼',permC.eye) + ' ' + fmtPermCur('鍵',permC.key) + ' ' + fmtPermCur('毒',permC.poison)
       : '<span class="dim">永久バフなし（転生で獲得）</span>';
 
     document.getElementById('rebirth-preview').innerHTML =
       '<span class="hi">次の転生ボーナス（追加分）</span><br>' +
-      'B: 攻+' + b.B_atk + '% SPD+' + b.B_spd + '% 命中+' + b.B_hit + '% 器用+' + b.B_dex + '% 被ダメ+' + b.B_def + '%<br>' +
-      'C: 拳+' + b.C_sword + '% 羽+' + b.C_shoes + '% 眼+' + b.C_eye + '% 鍵+' + b.C_key + '% 毒+' + b.C_poison + '%';
+      'B: 攻' + fmtPermAdd(b.B_atk) + ' SPD' + fmtPermAdd(b.B_spd) + ' 命中' + fmtPermAdd(b.B_hit) +
+         ' 器用' + fmtPermAdd(b.B_dex) + ' 被ダメ' + fmtPermAdd(b.B_def) + '<br>' +
+      'C: 拳' + fmtPermAdd(b.C_sword) + ' 羽' + fmtPermAdd(b.C_shoes) + ' 眼' + fmtPermAdd(b.C_eye) +
+         ' 鍵' + fmtPermAdd(b.C_key) + ' 毒' + fmtPermAdd(b.C_poison);
   }
 
   let rebirthPending = false;
@@ -754,7 +822,112 @@
     updateHpDisplay(); updateAll();
   }
 
+  // ===== セーブ・ロード（スロット制） =====
+  let saveToastTimer = null;
+  function slotKey(n) { return 'tapgame_save_' + n; }
+
+  function showSaveToast(msg) {
+    const el = document.getElementById('save-toast');
+    el.textContent = msg;
+    el.classList.add('show');
+    clearTimeout(saveToastTimer);
+    saveToastTimer = setTimeout(() => el.classList.remove('show'), 1800);
+  }
+
+  function saveToSlot(n) {
+    const now = new Date();
+    const ts  = (now.getMonth()+1) + '/' + now.getDate() + ' '
+              + now.getHours() + ':' + String(now.getMinutes()).padStart(2,'0');
+    const data = {
+      kills, exp, gold, currentHp,
+      stat: { ...stat },
+      items: Object.fromEntries(Object.entries(ITEMS).map(([k,v]) => [k, v.count])),
+      permB: { ...permB },
+      permC: { ...permC },
+      savedAt: ts,
+    };
+    localStorage.setItem(slotKey(n), JSON.stringify(data));
+    renderSaveSlots();
+    showSaveToast('💾 Slot' + n + ' に保存しました');
+  }
+
+  function loadFromSlot(n) {
+    const raw = localStorage.getItem(slotKey(n));
+    if (!raw) return;
+    if (!confirm('Slot' + n + ' をロードしますか？\n現在の進行は失われます。')) return;
+    try {
+      const d = JSON.parse(raw);
+      kills = d.kills ?? 0; exp = d.exp ?? 0; gold = d.gold ?? 0;
+      Object.assign(stat,  d.stat  ?? {});
+      Object.assign(permB, d.permB ?? {});
+      Object.assign(permC, d.permC ?? {});
+      for (const [k, v] of Object.entries(d.items ?? {}))
+        if (ITEMS[k]) ITEMS[k].count = v;
+      maxHp     = calcMaxHp(kills);
+      currentHp = d.currentHp ?? maxHp;
+      document.getElementById('kills').textContent = kills;
+      const reward = calcReward(maxHp);
+      document.getElementById('hp-max').textContent         = fmt(maxHp);
+      document.getElementById('reward-exp').textContent     = fmt(reward);
+      document.getElementById('reward-gold').textContent    = fmt(reward);
+      updateHpDisplay(); updateAll();
+      showSaveToast('📂 Slot' + n + ' をロードしました');
+    } catch { alert('ロードに失敗しました'); }
+  }
+
+  function deleteSlot(n) {
+    if (!confirm('Slot' + n + ' のデータを削除しますか？')) return;
+    localStorage.removeItem(slotKey(n));
+    renderSaveSlots();
+  }
+
+  function renderSaveSlots() {
+    const container = document.getElementById('save-slots');
+    container.innerHTML = '';
+    for (let i = 1; i <= 3; i++) {
+      let data = null;
+      try { data = JSON.parse(localStorage.getItem(slotKey(i))); } catch {}
+      const row = document.createElement('div');
+      row.className = 'save-slot';
+      const info = document.createElement('div');
+      info.className = 'save-slot-info';
+      if (data) {
+        info.innerHTML = '<span class="slot-num">Slot' + i + '</span> 撃破' + fmt(data.kills) + '体 ' + (data.savedAt || '');
+      } else {
+        info.innerHTML = '<span class="slot-num">Slot' + i + '</span> <span class="slot-empty">--- 空 ---</span>';
+      }
+      const btnSave = document.createElement('button');
+      btnSave.className = 'btn-ss btn-ss-save';
+      btnSave.textContent = data ? '上書き' : '保存';
+      btnSave.onclick = () => saveToSlot(i);
+      const btnLoad = document.createElement('button');
+      btnLoad.className = 'btn-ss btn-ss-load';
+      btnLoad.textContent = 'ロード';
+      btnLoad.disabled = !data;
+      btnLoad.onclick = () => loadFromSlot(i);
+      const btnDel = document.createElement('button');
+      btnDel.className = 'btn-ss btn-ss-del';
+      btnDel.textContent = '✕';
+      btnDel.disabled = !data;
+      btnDel.onclick = () => deleteSlot(i);
+      row.appendChild(info); row.appendChild(btnSave);
+      row.appendChild(btnLoad); row.appendChild(btnDel);
+      container.appendChild(row);
+    }
+  }
+
+  function resetAll() {
+    if (!confirm('ゲームを最初からやり直しますか？\n（セーブデータは消えません）')) return;
+    kills = 0; exp = 0; gold = 0;
+    stat.atk = 1; stat.spd = 1; stat.hit = 0; stat.dex = 0; stat.def = 0;
+    for (const item of Object.values(ITEMS)) item.count = 0;
+    for (const k of Object.keys(permB)) permB[k] = 0;
+    for (const k of Object.keys(permC)) permC[k] = 0;
+    spawnEnemy();
+  }
+
   spawnEnemy();
+  renderSaveSlots();
 </script>
 </body>
 </html>
